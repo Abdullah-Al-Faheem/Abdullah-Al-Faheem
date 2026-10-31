@@ -1,55 +1,56 @@
-# Copy into your profile repository as .github/workflows/koi.yml, then embed
-# <img src="koi/koi.gif" width="256" alt="My koi"> in its README.md.
 name: Koi
-
 on:
   schedule:
-    # Just after midnight UTC, so the koi shows the day that just ended.
+    # Run just after midnight UTC
     - cron: "20 0 * * *"
   workflow_dispatch:
   push:
-    paths: [.github/workflows/koi.yml]
-
+    paths:
+      - .github/workflows/koi.yml
 permissions:
   contents: write
-
-concurrency: koi
-
+concurrency:
+  group: koi
+  cancel-in-progress: false
 jobs:
   koi:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: yalongwastaken/git-koi@v1
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Generate koi
+        uses: yalongwastaken/git-koi@v1
         with:
           body: white
           output-dir: koi
-      - name: Commit the koi if it changed
+      - name: Commit and push koi
         shell: bash
         run: |
-          git pull --rebase origin "$GITHUB_REF_NAME"
-
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add koi/koi.gif
-
           if git diff --cached --quiet; then
             echo "The koi is unchanged."
             exit 0
           fi
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
           git commit -m "koi: draw the day's koi"
-          git push
-    #   - name: Commit the koi if it changed
-    #     shell: bash
-    #     run: |
-    #       git add koi/koi.gif
-    #       if git diff --cached --quiet; then
-    #         echo "The koi is unchanged; nothing to commit."
-    #         exit 0
-    #       fi
-    #       git config user.name "github-actions[bot]"
-    #       git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-    #       git commit --quiet --message "koi: draw the day's koi"
-    #       git push --quiet
+          # Retry pushing if the remote repository changes
+          for attempt in 1 2 3 4 5; do
+            echo "Push attempt $attempt..."
+            git fetch origin "$GITHUB_REF_NAME"
+            if ! git rebase "origin/$GITHUB_REF_NAME"; then
+              git rebase --abort
+              echo "Rebase failed."
+              exit 1
+            fi
+            if git push origin "HEAD:$GITHUB_REF_NAME"; then
+              echo "Koi successfully updated!"
+              exit 0
+            fi
+            echo "Push rejected. Retrying in 5 seconds..."
+            sleep 5
+          done
+          echo "Failed to push koi after 5 attempts."
+          exit 1
